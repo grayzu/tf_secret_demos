@@ -1,0 +1,79 @@
+resources:
+  repositories:
+  - repository: self
+    type: git
+    ref: master
+jobs:
+- job: InfraPlan
+  displayName: Infrastructure change plan
+  pool:
+    vmImage: ubuntu-20.04
+  steps:
+  - checkout: self
+  - task: TerraformInstaller@0
+    displayName: Use Terraform latest
+  - task: Bash@3
+    displayName: Terraform init
+    inputs:
+      targetType: inline
+      filePath: terraform init
+      script: >
+        terraform init
+  - task: Bash@3
+    displayName: Terraform Plan
+    inputs:
+      targetType: inline
+      filePath: terraform plan -out plan.out
+      script: '##vso[task.setvariable variable=planoutput]terraform plan -no-color -out plan.out '
+  - task: UniversalPackages@0
+    displayName: Publish Terraform Plan
+    inputs:
+      command: publish
+      publishDirectory: plan.out
+      feedListPublish: a2354caf-950e-4d9f-a9c7-b1507c88912b
+      packageListPublish: infra-plan.out
+      versionPublishSelector: major
+      packagePublishDescription: Output of Terraform plan for use by apply after approvals
+- job: InfraValidate
+  displayName: Infrastructure change validation
+  dependsOn: Phase_1
+  pool: server
+  steps:
+  - task: ManualValidation@0
+    displayName: Terraform Plan Validation
+    inputs:
+      notifyUsers: mark@grayzu.com
+      instructions: >-
+        Infrastructure changes have been planned but not applied. Please review the following changes and Approve or Reject:
+
+
+        $[ dependencies.InfraPlan.outputs['TfPlan.planoutput'] ]
+- job: InfraApply
+  displayName: Infrastructure change apply
+  dependsOn:
+  - Job_1
+  - Phase_1
+  pool:
+    vmImage: ubuntu-20.04
+  steps:
+  - checkout: self
+  - task: TerraformInstaller@0
+    displayName: Use Terraform latest
+  - task: Bash@3
+    displayName: Terraform init
+    inputs:
+      targetType: inline
+      script: terraform init
+  - task: UniversalPackages@0
+    displayName: Download Terraform Plan
+    inputs:
+      downloadDirectory: plan.out
+      feedListDownload: a2354caf-950e-4d9f-a9c7-b1507c88912b
+      packageListDownload: infra-plan.out
+      versionListDownload: '*'
+  - task: Bash@3
+    displayName: Terraform apply
+    inputs:
+      targetType: inline
+      script: terraform apply plan.out
+...
